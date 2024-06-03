@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
+	"github.com/gorilla/websocket"
 )
 
 type details struct {
@@ -20,13 +23,21 @@ type message struct {
 	Message string `json:"message"`
 }
 
-func getDetails(c *gin.Context) {
-	filename := "go.mod"
+var ctx = context.Background()
+var redisClient *redis.Client
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+// Event bus to handle messages
+var eventBus = make(chan string)
+
+func processFile(filename string) (details, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		fmt.Println(err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return details{}, fmt.Errorf("failed to open file: %v", err)
 	}
 	defer file.Close()
 
@@ -38,22 +49,112 @@ func getDetails(c *gin.Context) {
 		letters += len(scanner.Text())
 	}
 
-	fmt.Println("Lines:", lines)
-	fmt.Println("Words:", words)
-	fmt.Println("Letters:", letters)
-	result := details{Lines: lines, Words: words, Letter: letters}
+	if err := scanner.Err(); err != nil {
+		return details{}, fmt.Errorf("error reading file: %v", err)
+	}
 
-	c.JSON(http.StatusOK, result)
+	result := details{Lines: lines, Words: words, Letter: letters}
+	return result, nil
 }
 
 func getMessage(c *gin.Context) {
 	c.JSON(http.StatusOK, message{Message: "PONG"})
 }
 
+// Redis subscribe function
+func redisSubscribe(channel string) {
+	pubsub := redisClient.Subscribe(ctx, channel)
+	defer pubsub.Close()
+
+	for {
+		msg, err := pubsub.ReceiveMessage(ctx)
+		if err != nil {
+			fmt.Println("Error subscribing:", err)
+			close(eventBus)
+			return
+		}
+        fmt.Println("Message received:", msg.Payload)
+        eventBus <- "Got the file Information, Processing It..."
+		//eventBus <- msg.Payload
+        result, err := processFile(msg.Payload)
+        if err != nil {
+            eventBus <- fmt.Sprintf("Error processing file: %v", err)
+            return
+        }
+        //eventBus <- fmt.Sprintf("Lines: %d, Words: %d, Letters: %d", result.Lines, result.Words, result.Letter)
+        //send json as string
+        eventBus <- fmt.Sprintf("{\"Lines\": %d, \"Words\": %d, \"Letters\": %d}", result.Lines, result.Words, result.Letter)
+	}
+}
+
+func websocketHandler(c *gin.Context) {
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		fmt.Println("Failed to set websocket upgrade:", err)
+		return
+	}
+	defer conn.Close()
+
+    // Channel to handle read messages
+	clientMessages := make(chan string)
+
+	go func() {
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				fmt.Println("Error reading message:", err)
+				close(clientMessages)
+				return
+			}
+			fmt.Println("Message received:", string(msg))
+			// Add message to the event bus
+			eventBus <- string(msg)
+		}
+	}()
+
+	// Listen for messages from the event bus and send them to the WebSocket client
+	for {
+		select {
+		case msgFromEventBus := <-eventBus:
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(msgFromEventBus)); err != nil {
+				fmt.Println("Error writing message:", err)
+				return
+			}
+		case clientMsg, ok := <-clientMessages:
+			if !ok {
+				return // Exit the loop if clientMessages channel is closed
+			}
+			fmt.Println("Client message received:", clientMsg)
+		}
+	}
+
+
+}
+
 func main() {
+	redisClient = redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   0,
+	})
+
 	router := gin.Default()
 	router.GET("/", getMessage)
-	router.GET("/details", getDetails)
-
-	router.Run("localhost:6000")
+	router.GET("/details", func(c *gin.Context) {
+        filename := c.Query("filename")
+        result, err := processFile(filename)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, result)
+    })
+	router.GET("/ws", websocketHandler)
+	
+    //start the redis subscription
+    // messageChan := make(chan string)
+	// go redisSubscribe("channel", messageChan)
+    go redisSubscribe("channel")
+    
+    //start go http and websocket server
+    router.Run("localhost:6000")
 }
