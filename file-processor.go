@@ -35,7 +35,11 @@ var upgrader = websocket.Upgrader{
 var eventBus = make(chan string)
 
 func processFile(filename string) (details, error) {
-	file, err := os.Open(filename)
+	fileLookUpPath := os.Getenv("FILE_LOOKUP_PATH")
+	if fileLookUpPath == "" {
+		fileLookUpPath = "/tmp/upload"
+	}
+	file, err := os.Open(fileLookUpPath+"/"+filename)
 	if err != nil {
 		return details{}, fmt.Errorf("failed to open file: %v", err)
 	}
@@ -132,8 +136,17 @@ func websocketHandler(c *gin.Context) {
 }
 
 func main() {
+	//read the redis connection string from the environment
+	redisHost := os.Getenv("REDIS_HOST")
+	if redisHost == "" {
+		redisHost = "localhost"
+	}
+	redisPort := os.Getenv("REDIS_PORT")
+	if redisPort == "" {
+		redisPort = "6379"
+	}
 	redisClient = redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: redisHost + ":" + redisPort,
 		DB:   0,
 	})
 
