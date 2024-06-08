@@ -39,7 +39,7 @@ func processFile(filename string) (details, error) {
 	if fileLookUpPath == "" {
 		fileLookUpPath = "/tmp/upload"
 	}
-	file, err := os.Open(fileLookUpPath+"/"+filename)
+	file, err := os.Open(fileLookUpPath + "/" + filename)
 	if err != nil {
 		return details{}, fmt.Errorf("failed to open file: %v", err)
 	}
@@ -77,17 +77,17 @@ func redisSubscribe(channel string) {
 			close(eventBus)
 			return
 		}
-        fmt.Println("Message received:", msg.Payload)
-        eventBus <- "Got the file Information, Processing It..."
+		fmt.Println("Message received:", msg.Payload)
+		eventBus <- "Got the file Information, Processing It..."
 		//eventBus <- msg.Payload
-        result, err := processFile(msg.Payload)
-        if err != nil {
-            eventBus <- fmt.Sprintf("Error processing file: %v", err)
-            return
-        }
-        //eventBus <- fmt.Sprintf("Lines: %d, Words: %d, Letters: %d", result.Lines, result.Words, result.Letter)
-        //send json as string
-        eventBus <- fmt.Sprintf("{\"Lines\": %d, \"Words\": %d, \"Letters\": %d}", result.Lines, result.Words, result.Letter)
+		result, err := processFile(msg.Payload)
+		if err != nil {
+			eventBus <- fmt.Sprintf("Error processing file: %v", err)
+			return
+		}
+		//eventBus <- fmt.Sprintf("Lines: %d, Words: %d, Letters: %d", result.Lines, result.Words, result.Letter)
+		//send json as string
+		eventBus <- fmt.Sprintf("{\"Lines\": %d, \"Words\": %d, \"Letters\": %d}", result.Lines, result.Words, result.Letter)
 	}
 }
 
@@ -99,7 +99,7 @@ func websocketHandler(c *gin.Context) {
 	}
 	defer conn.Close()
 
-    // Channel to handle read messages
+	// Channel to handle read messages
 	clientMessages := make(chan string)
 
 	go func() {
@@ -132,7 +132,6 @@ func websocketHandler(c *gin.Context) {
 		}
 	}
 
-
 }
 
 func main() {
@@ -153,21 +152,21 @@ func main() {
 	router := gin.Default()
 	router.GET("/", getMessage)
 	router.GET("/details", func(c *gin.Context) {
-        filename := c.Query("filename")
-        result, err := processFile(filename)
-        if err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-            return
-        }
-        c.JSON(http.StatusOK, result)
-    })
+		filename := c.Query("filename")
+		result, err := processFile(filename)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, result)
+	})
 	router.GET("/ws", websocketHandler)
-	
-    //start the redis subscription
-    // messageChan := make(chan string)
+
+	//start the redis subscription
+	// messageChan := make(chan string)
 	// go redisSubscribe("channel", messageChan)
-    go redisSubscribe("channel")
-    
-    //start go http and websocket server
-    router.Run("localhost:6000")
+	go redisSubscribe("channel")
+
+	//start go http and websocket server
+	router.Run("0.0.0.0:6000")
 }
