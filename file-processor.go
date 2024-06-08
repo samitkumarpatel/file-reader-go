@@ -79,15 +79,12 @@ func redisSubscribe(channel string) {
 		}
 		fmt.Println("Message received:", msg.Payload)
 		eventBus <- "Got the file Information, Processing It..."
-		//eventBus <- msg.Payload
 		result, err := processFile(msg.Payload)
 		if err != nil {
 			eventBus <- fmt.Sprintf("Error processing file: %v", err)
 			return
 		}
-		//eventBus <- fmt.Sprintf("Lines: %d, Words: %d, Letters: %d", result.Lines, result.Words, result.Letter)
-		//send json as string
-		eventBus <- fmt.Sprintf("{\"Lines\": %d, \"Words\": %d, \"Letters\": %d}", result.Lines, result.Words, result.Letter)
+		eventBus <- fmt.Sprintf("{\"lines\": %d, \"words\": %d, \"letters\": %d}", result.Lines, result.Words, result.Letter)
 	}
 }
 
@@ -103,20 +100,20 @@ func websocketHandler(c *gin.Context) {
 	clientMessages := make(chan string)
 
 	go func() {
+		defer close(clientMessages)
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
 				fmt.Println("Error reading message:", err)
-				close(clientMessages)
 				return
 			}
 			fmt.Println("Message received:", string(msg))
-			// Add message to the event bus
-			eventBus <- string(msg)
+			if msg != nil {
+				eventBus <- string(msg)
+			}
 		}
 	}()
 
-	// Listen for messages from the event bus and send them to the WebSocket client
 	for {
 		select {
 		case msgFromEventBus := <-eventBus:
@@ -126,16 +123,14 @@ func websocketHandler(c *gin.Context) {
 			}
 		case clientMsg, ok := <-clientMessages:
 			if !ok {
-				return // Exit the loop if clientMessages channel is closed
+				return
 			}
 			fmt.Println("Client message received:", clientMsg)
 		}
 	}
-
 }
 
 func main() {
-	//read the redis connection string from the environment
 	redisHost := os.Getenv("REDIS_HOST")
 	if redisHost == "" {
 		redisHost = "localhost"
@@ -162,11 +157,7 @@ func main() {
 	})
 	router.GET("/ws", websocketHandler)
 
-	//start the redis subscription
-	// messageChan := make(chan string)
-	// go redisSubscribe("channel", messageChan)
 	go redisSubscribe("channel")
 
-	//start go http and websocket server
 	router.Run("0.0.0.0:6000")
 }

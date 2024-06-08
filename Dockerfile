@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine
+FROM golang:1.21-alpine
 
 RUN mkdir /usr/application
 WORKDIR /usr/application
@@ -6,9 +6,7 @@ WORKDIR /usr/application
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY *.go ./
+COPY file-processor.go ./
+RUN go build -o file-processor
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /docker-gs-ping
-
-CMD ["/docker-gs-ping"]
-
+CMD ["./file-processor"]
